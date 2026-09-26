@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sobha Windsor - Luxury Residential Portal</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Playfair Display for Victorian elegance & Inter for crisp modern UI -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800&family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,400&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        victorian: {
+                            navy: '#0b1320',
+                            royal: '#101e33',
+                            accent: '#1e3352',
+                            gold: '#d4af37',
+                            goldLight: '#f3e5ab',
+                            goldDark: '#996515',
+                            cream: '#fcfaf2',
+                        }
+                    },
+                    fontFamily: {
+                        cinzel: ['Cinzel', 'serif'],
+                        playfair: ['Playfair Display', 'serif'],
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0b1320;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2a3e5c;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #d4af37;
+        }
+        .gold-border-gradient {
+            border-image: linear-gradient(to right, #996515, #d4af37, #f3e5ab, #d4af37, #996515) 1;
+        }
+        .gold-text-gradient {
+            background: linear-gradient(135deg, #fff2cb 0%, #d4af37 50%, #aa7c11 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .glass-card {
+            background: rgba(16, 30, 51, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(212, 175, 55, 0.18);
+        }
+        .glass-card-hover:hover {
+            border-color: rgba(212, 175, 55, 0.45);
+            box-shadow: 0 10px 30px -10px rgba(212, 175, 55, 0.15);
+        }
+        @media print {
+            body * { visibility: hidden; }
+            #printableReceiptModal, #printableReceiptModal * { visibility: visible; }
+            #printableReceiptModal { position: absolute; left: 0; top: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body class="h-full font-sans bg-[#080d1a] text-slate-200 antialiased selection:bg-amber-500/30 selection:text-amber-200 flex flex-col min-h-screen">
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase configuration from environment or fallback
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sobha-windsor-portal';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "demo-api-key",
+            authDomain: "demo-app.firebaseapp.com",
+            projectId: "demo-app",
+            storageBucket: "demo-app.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef"
+        };
+
+        let app, db, auth;
+        let currentUser = null;
+
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+
+            // Handle Authentication
+            const initAuth = async () => {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            };
+            initAuth();
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    currentUser = user;
+                    console.log("Authenticated as:", user.uid);
+                    listenToTickets();
+                }
+            });
+        } catch (e) {
+            console.warn("Firebase initialization skipped or failed, running with local reactive state:", e);
+        }
+
+        // Live Firestore listener for Infra Maintenance Tickets
+        function listenToTickets() {
+            if (!db) return;
+            try {
+                const ticketsCol = collection(db, 'artifacts', appId, 'public', 'data', 'infra_tickets');
+                onSnapshot(ticketsCol, (snapshot) => {
+                    const fetchedTickets = [];
+                    snapshot.forEach((doc) => {
+                        fetchedTickets.push({ id: doc.id, ...doc.data() });
+                    });
+                    if (fetchedTickets.length > 0) {
+                        window.ticketsData = fetchedTickets;
+                        if (window.renderInfraTickets) window.renderInfraTickets();
+                    }
+                }, (error) => {
+                    console.warn("Firestore listen error (using local ticket fallback):", error);
+                });
+            } catch (err) {
+                console.error("Error setting up ticket listener:", err);
+            }
+        }
+
+        // Window helper for adding ticket to Firebase
+        window.saveTicketToFirebase = async function(ticket) {
+            if (!db || !auth.currentUser) return false;
+            try {
+                const ticketsCol = collection(db, 'artifacts', appId, 'public', 'data', 'infra_tickets');
+                await addDoc(ticketsCol, {
+                    ...ticket,
+                    createdAt: new Date().toISOString(),
+                    userId: auth.currentUser.uid
+                });
+                return true;
+            } catch (err) {
+                console.error("Failed to save ticket to Firestore:", err);
+                return false;
+            }
+        };
+    </script>
+
+    <!-- Top Announcement Bar -->
+    <div class="bg-gradient-to-r from-amber-900/60 via-amber-700/80 to-amber-900/60 text-amber-100 text-xs py-1.5 px-4 text-center border-b border-amber-500/30 font-medium tracking-wide flex items-center justify-center gap-3">
+        <span class="inline-flex items-center gap-1.5 bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/40 uppercase font-semibold">
+            <i class="fa-solid fa-bullhorn text-amber-400"></i> Notice
+        </span>
+        <span>Sobha Windsor Annual General Body Meeting scheduled for Oct 18, 2026 at Tudor Hall Clubhouse.</span>
+        <a href="#policy" onclick="switchTab('policy')" class="underline hover:text-white font-semibold ml-2 text-[11px]">View Bylaws &rarr;</a>
+    </div>
+
+    <!-- Main Navigation Bar -->
+    <header class="sticky top-0 z-40 bg-[#0a1320]/95 backdrop-blur-md border-b border-amber-500/20 shadow-2xl">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20">
+                
+                <!-- Brand / Logo -->
+                <div class="flex items-center gap-3 cursor-pointer" onclick="switchTab('owner')">
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-600 via-amber-500 to-amber-800 p-0.5 shadow-lg shadow-amber-900/30 flex items-center justify-center">
+                        <div class="w-full h-full bg-[#0a1320] rounded-[10px] flex items-center justify-center border border-amber-400/30">
+                            <span class="font-cinzel text-xl font-bold gold-text-gradient">SW</span>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="font-cinzel font-bold text-lg sm:text-xl tracking-wider text-slate-100 flex items-center gap-2">
+                            SOBHA WINDSOR
+                            <span class="hidden sm:inline-block text-[10px] uppercase font-sans font-semibold tracking-widest px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded">Whitefield</span>
+                        </div>
+                        <div class="text-[11px] text-amber-200/60 font-serif italic tracking-wide">English Victorian Estates</div>
+                    </div>
+                </div>
+
+                <!-- Desktop 5 Main Nav Tabs -->
+                <nav class="hidden md:flex items-center space-x-1 lg:space-x-2">
+                    <button id="nav-owner" onclick="switchTab('owner')" class="nav-btn active-tab px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2">
+                        <i class="fa-solid fa-house-chimney text-amber-400"></i>
+                        <span>Owner</span>
+                    </button>
+                    <button id="nav-policy" onclick="switchTab('policy')" class="nav-btn px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2">
+                        <i class="fa-solid fa-scroll text-slate-400"></i>
+                        <span>Policy</span>
+                    </button>
+                    <button id="nav-finance" onclick="switchTab('finance')" class="nav-btn px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2">
+                        <i class="fa-solid fa-vault text-slate-400"></i>
+                        <span>Finance</span>
+                    </button>
+                    <button id="nav-vendors" onclick="switchTab('vendors')" class="nav-btn px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2">
+                        <i class="fa-solid fa-handshake-angle text-slate-400"></i>
+                        <span>Vendors</span>
+                    </button>
+                    <button id="nav-infra" onclick="switchTab('infra')" class="nav-btn px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2">
+                        <i class="fa-solid fa-plug-circle-bolt text-slate-400"></i>
+                        <span>Infra</span>
+                    </button>
+                </nav>
+
+                <!-- User Profile & Authentication Pill -->
+                <div class="flex items-center gap-3">
+                    <div id="userProfileBadge" onclick="openAuthModal()" class="flex items-center gap-2.5 bg-slate-900/90 border border-amber-500/30 hover:border-amber-400 p-1.5 pl-3 pr-3.5 rounded-full cursor-pointer transition-all duration-200 shadow-inner group">
+                        <div class="relative">
+                            <img id="userAvatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120" alt="User Avatar" class="w-8 h-8 rounded-full object-cover border border-amber-400/50">
+                            <span id="roleIndicatorDot" class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-amber-400 rounded-full border-2 border-slate-900" title="Owner Profile"></span>
+                        </div>
+                        <div class="text-left hidden sm:block">
+                            <div id="userNameDisplay" class="text-xs font-semibold text-slate-100 group-hover:text-amber-300 transition-colors">Eleanor Vance</div>
+                            <div class="text-[10px] text-amber-300/80 font-mono flex items-center gap-1">
+                                <span id="userFlatDisplay">Block A-304</span>
+                                <span class="text-slate-600">•</span>
+                                <span id="userRoleBadge" class="uppercase font-semibold text-[9px] text-amber-400">Owner</span>
+                            </div>
+                        </div>
+                        <i class="fa-solid fa-sliders text-xs text-slate-400 group-hover:text-amber-400 ml-1 transition-colors"></i>
+                    </div>
+
+                    <!-- Mobile Menu Button -->
+                    <button onclick="toggleMobileMenu()" class="md:hidden p-2.5 rounded-lg bg-slate-900 border border-amber-500/20 text-amber-400 hover:text-white">
+                        <i class="fa-solid fa-bars text-lg"></i>
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Mobile Dropdown Navigation -->
+        <div id="mobileMenu" class="hidden md:hidden border-t border-amber-500/20 bg-[#0d1829] px-4 pt-2 pb-4 space-y-2">
+            <button onclick="switchTab('owner'); toggleMobileMenu()" class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-3 bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                <i class="fa-solid fa-house-chimney w-5"></i> Owner Directory
+            </button>
+            <button onclick="switchTab('policy'); toggleMobileMenu()" class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-3 text-slate-300 hover:bg-slate-800">
+                <i class="fa-solid fa-scroll w-5"></i> Community Policies
+            </button>
+            <button onclick="switchTab('finance'); toggleMobileMenu()" class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-3 text-slate-300 hover:bg-slate-800">
+                <i class="fa-solid fa-vault w-5"></i> Financial Dues & Accounts
+            </button>
+            <button onclick="switchTab('vendors'); toggleMobileMenu()" class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-3 text-slate-300 hover:bg-slate-800">
+                <i class="fa-solid fa-handshake-angle w-5"></i> Approved Vendors
+            </button>
+            <button onclick="switchTab('infra'); toggleMobileMenu()" class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-3 text-slate-300 hover:bg-slate-800">
+                <i class="fa-solid fa-plug-circle-bolt w-5"></i> Infrastructure & Tickets
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT VIEW AREA -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- ================= TAB 1: OWNER TAB ================= -->
+        <section id="tab-owner" class="tab-content space-y-6">
+            
+            <!-- Hero Header Banner -->
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-victorian-royal to-slate-900 border border-amber-500/30 p-6 sm:p-8 shadow-2xl">
+                <div class="absolute -right-10 -bottom-10 opacity-10 text-amber-400 pointer-events-none">
+                    <i class="fa-solid fa-building-columns text-[220px]"></i>
+                </div>
+                <div class="relative z-10 max-w-3xl">
+                    <div class="flex items-center gap-2 text-amber-400 font-semibold text-xs tracking-wider uppercase mb-2">
+                        <i class="fa-solid fa-shield-halved"></i> Verified Resident Register
+                    </div>
+                    <h1 class="font-cinzel text-2xl sm:text-4xl font-bold gold-text-gradient mb-3">Owner & Resident Directory</h1>
+                    <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+                        Manage your unit details, register co-residents & tenants, verify parking bay allocations, and access unit documents across all 438 Victorian luxury flats in Sobha Windsor.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20">
+                    <div class="text-xs text-slate-400 font-medium">Total Windsor Units</div>
+                    <div class="text-2xl font-bold text-slate-100 font-cinzel mt-1">438 <span class="text-xs font-sans text-amber-400 font-normal">Flats</span></div>
+                    <div class="text-[11px] text-slate-400 mt-1">Blocks A, B, C & D</div>
+                </div>
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20">
+                    <div class="text-xs text-slate-400 font-medium">Occupancy Rate</div>
+                    <div class="text-2xl font-bold text-emerald-400 font-cinzel mt-1">92.4%</div>
+                    <div class="text-[11px] text-slate-400 mt-1">405 Active Families</div>
+                </div>
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20">
+                    <div class="text-xs text-slate-400 font-medium">My Flat Status</div>
+                    <div id="myFlatCardStatus" class="text-lg font-bold text-amber-300 mt-1 flex items-center gap-2">
+                        <span>Block A-304</span>
+                        <span class="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">Self Occupied</span>
+                    </div>
+                    <div class="text-[11px] text-slate-400 mt-1">Basement 1 Slot B1-142</div>
+                </div>
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20">
+                    <div class="text-xs text-slate-400 font-medium">Tenant Agreements</div>
+                    <div class="text-2xl font-bold text-amber-400 font-cinzel mt-1">100%</div>
+                    <div class="text-[11px] text-emerald-400 mt-1"><i class="fa-solid fa-check"></i> Police Verified</div>
+                </div>
+            </div>
+
+            <!-- Search & Actions Bar -->
+            <div class="glass-card rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between border border-amber-500/20">
+                <div class="relative w-full sm:w-80">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-sm"></i>
+                    <input type="text" id="ownerSearchInput" oninput="filterOwners()" placeholder="Search Flat #, Name, Vehicle..." class="w-full bg-slate-900/90 text-sm text-slate-100 pl-10 pr-4 py-2 rounded-lg border border-slate-700 focus:border-amber-400 focus:outline-none">
+                </div>
+                
+                <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
+                    <select id="blockFilter" onchange="filterOwners()" class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-lg px-3 py-2 focus:border-amber-400 outline-none">
+                        <option value="ALL">All Blocks (A, B, C, D)</option>
+                        <option value="Block A">Block A (Tudor Wing)</option>
+                        <option value="Block B">Block B (Victorian Wing)</option>
+                        <option value="Block C">Block C (Georgian Wing)</option>
+                        <option value="Block D">Block D (Edwardian Wing)</option>
+                    </select>
+                    
+                    <select id="typeFilter" onchange="filterOwners()" class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-lg px-3 py-2 focus:border-amber-400 outline-none">
+                        <option value="ALL">All Occupancies</option>
+                        <option value="Self Occupied">Self Occupied</option>
+                        <option value="Tenant Rented">Tenant Rented</option>
+                    </select>
+
+                    <button onclick="openEditProfileModal()" class="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-semibold text-xs rounded-lg shadow-md transition-all flex items-center gap-1.5 whitespace-nowrap">
+                        <i class="fa-solid fa-user-pen"></i> Update My Unit
+                    </button>
+                </div>
+            </div>
+
+            <!-- Owners Directory Table -->
+            <div class="glass-card rounded-xl overflow-hidden border border-amber-500/20">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-sm">
+                        <thead>
+                            <tr class="bg-slate-900/90 text-amber-400/90 border-b border-amber-500/20 text-xs uppercase font-mono tracking-wider">
+                                <th class="py-3.5 px-4 font-semibold">Flat & Block</th>
+                                <th class="py-3.5 px-4 font-semibold">Primary Resident / Owner</th>
+                                <th class="py-3.5 px-4 font-semibold">Contact Info</th>
+                                <th class="py-3.5 px-4 font-semibold">Occupancy Type</th>
+                                <th class="py-3.5 px-4 font-semibold">Parking Bays</th>
+                                <th class="py-3.5 px-4 font-semibold text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ownersTableBody" class="divide-y divide-slate-800/80 text-slate-300">
+                            <!-- Populated dynamically via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 2: POLICY TAB ================= -->
+        <section id="tab-policy" class="tab-content hidden space-y-6">
+            
+            <!-- Policy Header -->
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-victorian-royal to-slate-900 border border-amber-500/30 p-6 sm:p-8 shadow-2xl">
+                <div class="absolute -right-6 -bottom-6 opacity-10 text-amber-400 pointer-events-none">
+                    <i class="fa-solid fa-book-bookmark text-[200px]"></i>
+                </div>
+                <div class="relative z-10 max-w-3xl">
+                    <div class="flex items-center gap-2 text-amber-400 font-semibold text-xs tracking-wider uppercase mb-2">
+                        <i class="fa-solid fa-scale-balanced"></i> Sobha Windsor Bylaws 2026
+                    </div>
+                    <h1 class="font-cinzel text-2xl sm:text-4xl font-bold gold-text-gradient mb-3">Community Policies & Guidelines</h1>
+                    <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+                        To maintain standard luxury living, Victorian landscaping aesthetics, peace, and security, all owners and residents are required to adhere strictly to community rules.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Category Filter Tabs & Search -->
+            <div class="glass-card rounded-xl p-4 space-y-4 border border-amber-500/20">
+                <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div class="relative w-full sm:w-80">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-sm"></i>
+                        <input type="text" id="policySearchInput" oninput="filterPolicies()" placeholder="Search bylaws e.g. Pets, Noise, Clubhouse..." class="w-full bg-slate-900/90 text-sm text-slate-100 pl-10 pr-4 py-2 rounded-lg border border-slate-700 focus:border-amber-400 focus:outline-none">
+                    </div>
+                    <button onclick="downloadPolicyPDF()" class="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-amber-500/30 text-amber-300 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-file-pdf text-amber-400"></i> Download Full Rulebook (PDF)
+                    </button>
+                </div>
+
+                <!-- Policy Category Chips -->
+                <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+                    <button onclick="filterPolicyCategory('ALL')" class="policy-cat-btn active-policy-cat px-3 py-1.5 rounded-full border border-amber-500/40 font-medium whitespace-nowrap transition-all">All Rules</button>
+                    <button onclick="filterPolicyCategory('Move-In')" class="policy-cat-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-slate-300 font-medium whitespace-nowrap transition-all">Move-In & Move-Out</button>
+                    <button onclick="filterPolicyCategory('Clubhouse')" class="policy-cat-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-slate-300 font-medium whitespace-nowrap transition-all">Clubhouse & Pool</button>
+                    <button onclick="filterPolicyCategory('Renovation')" class="policy-cat-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-slate-300 font-medium whitespace-nowrap transition-all">Interior Renovations</button>
+                    <button onclick="filterPolicyCategory('Pets')" class="policy-cat-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-slate-300 font-medium whitespace-nowrap transition-all">Pet Guidelines</button>
+                    <button onclick="filterPolicyCategory('Parking')" class="policy-cat-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-slate-300 font-medium whitespace-nowrap transition-all">Parking & Speed</button>
+                </div>
+            </div>
+
+            <!-- Policies Grid -->
+            <div id="policiesGrid" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Dynamically Populated via JS -->
+            </div>
+
+            <!-- Recent Policy Updates Timeline -->
+            <div class="glass-card rounded-xl p-6 border border-amber-500/20">
+                <h3 class="font-cinzel text-lg font-bold text-amber-300 mb-4 flex items-center gap-2">
+                    <i class="fa-solid fa-clock-rotate-left"></i> Policy Amendments & Announcements
+                </h3>
+                <div class="space-y-4 border-l-2 border-amber-500/30 pl-4 text-xs sm:text-sm">
+                    <div class="relative">
+                        <div class="absolute -left-[21px] top-1 w-2.5 h-2.5 bg-amber-400 rounded-full"></div>
+                        <div class="font-semibold text-slate-100">EV Charger Installation Code Update (Sep 2026)</div>
+                        <p class="text-slate-400 text-xs mt-1">All personal basement EV chargers must be connected via BESCOM dual meters with prior NOC from Management.</p>
+                    </div>
+                    <div class="relative">
+                        <div class="absolute -left-[21px] top-1 w-2.5 h-2.5 bg-slate-600 rounded-full"></div>
+                        <div class="font-semibold text-slate-100">Swimming Pool Quiet Hours (Aug 2026)</div>
+                        <p class="text-slate-400 text-xs mt-1">Adult swimming hours extended to 10:00 PM. No music permitted after 9:00 PM at pool deck.</p>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 3: FINANCE TAB ================= -->
+        <section id="tab-finance" class="tab-content hidden space-y-6">
+            
+            <!-- Finance Header Banner -->
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-victorian-royal to-slate-900 border border-amber-500/30 p-6 sm:p-8 shadow-2xl">
+                <div class="absolute -right-10 -bottom-10 opacity-10 text-amber-400 pointer-events-none">
+                    <i class="fa-solid fa-vault text-[220px]"></i>
+                </div>
+                <div class="relative z-10 max-w-3xl">
+                    <div class="flex items-center gap-2 text-amber-400 font-semibold text-xs tracking-wider uppercase mb-2">
+                        <i class="fa-solid fa-coins"></i> Accounting & Maintenance Ledger
+                    </div>
+                    <h1 class="font-cinzel text-2xl sm:text-4xl font-bold gold-text-gradient mb-3">Finance & Dues Management</h1>
+                    <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+                        Track quarterly maintenance invoices, review historical payment receipts, pay dues via integrated gateway, and inspect the community corpus fund ledger.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Current Dues Banner & Action Card -->
+            <div class="glass-card rounded-2xl p-6 border-2 border-amber-500/40 bg-gradient-to-br from-slate-900/90 via-victorian-navy to-slate-950">
+                <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold uppercase">Q3 2026 Billing Cycle</span>
+                            <span class="text-xs text-slate-400">Due Date: Oct 15, 2026</span>
+                        </div>
+                        <div class="mt-3 flex items-baseline gap-3">
+                            <span class="font-cinzel text-3xl sm:text-5xl font-extrabold text-slate-100" id="dueAmountDisplay">₹22,150.00</span>
+                            <span id="dueStatusBadge" class="text-xs px-2.5 py-1 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 font-semibold">Pending Payment</span>
+                        </div>
+                        <div class="mt-2 text-xs text-slate-400 flex flex-wrap gap-x-4 gap-y-1">
+                            <span>Main SqFt Charge: ₹18,450</span> • 
+                            <span>Water Charge (Metered): ₹1,200</span> • 
+                            <span>Corpus Sinking Fund: ₹2,500</span>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+                        <button onclick="openPaymentGatewayModal()" class="flex-1 lg:flex-none px-6 py-3.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 text-slate-950 font-bold text-sm rounded-xl shadow-xl hover:shadow-amber-500/20 transition-all flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-credit-card"></i> Pay Outstanding Dues
+                        </button>
+                        <button onclick="openReceiptModal('REC-2026-Q2-304')" class="px-4 py-3.5 bg-slate-900 border border-slate-700 hover:border-amber-400 text-slate-200 text-xs font-semibold rounded-xl transition-all flex items-center gap-2">
+                            <i class="fa-solid fa-file-invoice text-amber-400"></i> View Last Receipt
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Community Financial Health & Corpus Overview -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                <div class="glass-card rounded-xl p-5 border border-amber-500/20">
+                    <div class="flex items-center justify-between text-xs text-slate-400">
+                        <span>Total Corpus Reserve Fund</span>
+                        <i class="fa-solid fa-building-columns text-amber-400"></i>
+                    </div>
+                    <div class="text-2xl font-bold font-cinzel text-slate-100 mt-2">₹2.18 Crores</div>
+                    <p class="text-[11px] text-emerald-400 mt-2 flex items-center gap-1">
+                        <i class="fa-solid fa-arrow-trend-up"></i> +8.4% YoY Fixed Deposit Yield
+                    </p>
+                </div>
+
+                <div class="glass-card rounded-xl p-5 border border-amber-500/20">
+                    <div class="flex items-center justify-between text-xs text-slate-400">
+                        <span>Q3 Monthly Collection Rate</span>
+                        <i class="fa-solid fa-chart-line text-emerald-400"></i>
+                    </div>
+                    <div class="text-2xl font-bold font-cinzel text-emerald-400 mt-2">94.2% Collected</div>
+                    <div class="w-full bg-slate-800 rounded-full h-2 mt-3">
+                        <div class="bg-gradient-to-r from-amber-500 to-emerald-400 h-2 rounded-full" style="width: 94.2%"></div>
+                    </div>
+                </div>
+
+                <div class="glass-card rounded-xl p-5 border border-amber-500/20">
+                    <div class="flex items-center justify-between text-xs text-slate-400">
+                        <span>Monthly Expenses (Avg)</span>
+                        <i class="fa-solid fa-receipt text-amber-400"></i>
+                    </div>
+                    <div class="text-2xl font-bold font-cinzel text-slate-100 mt-2">₹41.8 Lakhs</div>
+                    <p class="text-[11px] text-slate-400 mt-2">Security, STP, Housekeeping & Electricity</p>
+                </div>
+
+            </div>
+
+            <!-- Transaction Ledger History -->
+            <div class="glass-card rounded-xl overflow-hidden border border-amber-500/20">
+                <div class="p-4 bg-slate-900/90 border-b border-amber-500/20 flex items-center justify-between">
+                    <h3 class="font-cinzel text-base font-bold text-amber-300">Personal Maintenance Payment History</h3>
+                    <span class="text-xs text-slate-400">Flat: <strong class="text-slate-200" id="financeFlatHeader">Block A-304</strong></span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-900 text-slate-400 text-xs uppercase font-mono border-b border-slate-800">
+                            <tr>
+                                <th class="py-3 px-4">Invoice / Receipt ID</th>
+                                <th class="py-3 px-4">Period</th>
+                                <th class="py-3 px-4">Amount</th>
+                                <th class="py-3 px-4">Payment Method</th>
+                                <th class="py-3 px-4">Date Paid</th>
+                                <th class="py-3 px-4">Status</th>
+                                <th class="py-3 px-4 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="financeHistoryTable" class="divide-y divide-slate-800 text-slate-300">
+                            <!-- JS populated -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 4: VENDORS TAB ================= -->
+        <section id="tab-vendors" class="tab-content hidden space-y-6">
+            
+            <!-- Vendor Header Banner -->
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-victorian-royal to-slate-900 border border-amber-500/30 p-6 sm:p-8 shadow-2xl">
+                <div class="absolute -right-6 -bottom-6 opacity-10 text-amber-400 pointer-events-none">
+                    <i class="fa-solid fa-handshake text-[200px]"></i>
+                </div>
+                <div class="relative z-10 max-w-3xl">
+                    <div class="flex items-center gap-2 text-amber-400 font-semibold text-xs tracking-wider uppercase mb-2">
+                        <i class="fa-solid fa-circle-check"></i> Management Approved Partners
+                    </div>
+                    <h1 class="font-cinzel text-2xl sm:text-4xl font-bold gold-text-gradient mb-3">Facility Vendor Directory</h1>
+                    <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+                        Access verified utility contractors, emergency liaison helplines (GAIL, BESCOM, Lift Engineers), security supervisor contacts, and service SLA ratings.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Filter & Request Row -->
+            <div class="glass-card rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between border border-amber-500/20">
+                <div class="relative w-full sm:w-80">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-sm"></i>
+                    <input type="text" id="vendorSearchInput" oninput="filterVendors()" placeholder="Search vendor name, utility, gas, lift..." class="w-full bg-slate-900/90 text-sm text-slate-100 pl-10 pr-4 py-2 rounded-lg border border-slate-700 focus:border-amber-400 focus:outline-none">
+                </div>
+
+                <div class="flex items-center gap-3 w-full sm:w-auto">
+                    <select id="vendorCategorySelect" onchange="filterVendors()" class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-lg px-3 py-2 outline-none">
+                        <option value="ALL">All Categories</option>
+                        <option value="Security">Security & Access</option>
+                        <option value="Utilities">Utilities (Gas/BESCOM)</option>
+                        <option value="Maintenance">STP & Water Pumps</option>
+                        <option value="Elevators">Lifts & Escalators</option>
+                        <option value="Housekeeping">Housekeeping & Greenery</option>
+                    </select>
+
+                    <button onclick="openVendorRequestModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-amber-500/30 text-amber-300 text-xs font-semibold rounded-lg transition-all flex items-center gap-2 whitespace-nowrap">
+                        <i class="fa-solid fa-plus text-amber-400"></i> Request Special Service
+                    </button>
+                </div>
+            </div>
+
+            <!-- Vendor Cards Grid -->
+            <div id="vendorsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Dynamically populated via JS -->
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 5: INFRA TAB ================= -->
+        <section id="tab-infra" class="tab-content hidden space-y-6">
+            
+            <!-- Infra Header Banner -->
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-victorian-royal to-slate-900 border border-amber-500/30 p-6 sm:p-8 shadow-2xl">
+                <div class="absolute -right-8 -bottom-8 opacity-10 text-amber-400 pointer-events-none">
+                    <i class="fa-solid fa-gears text-[220px]"></i>
+                </div>
+                <div class="relative z-10 max-w-3xl">
+                    <div class="flex items-center gap-2 text-amber-400 font-semibold text-xs tracking-wider uppercase mb-2">
+                        <i class="fa-solid fa-heart-pulse"></i> Real-Time Community Health
+                    </div>
+                    <h1 class="font-cinzel text-2xl sm:text-4xl font-bold gold-text-gradient mb-3">Infrastructure & Tickets</h1>
+                    <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+                        Monitor live status of Diesel Power Generators, Sewage Treatment Plants (STP), Water Hydro-Pneumatic Pumps, Lifts, and submit/track Maintenance Complaints with live updates.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Asset Health Monitoring Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                <!-- Asset Card 1: DG Power -->
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20 relative overflow-hidden">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs text-slate-400 font-semibold uppercase">Diesel Generators</span>
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" title="100% Standby Operational"></span>
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-2xl font-bold font-cinzel text-slate-100">2 / 2 Ready</span>
+                    </div>
+                    <div class="mt-2 text-xs text-slate-400">Diesel Level: <strong class="text-emerald-400">88% (4,200 Liters)</strong></div>
+                    <div class="mt-2 w-full bg-slate-800 rounded-full h-1.5">
+                        <div class="bg-emerald-400 h-1.5 rounded-full" style="width: 88%"></div>
+                    </div>
+                </div>
+
+                <!-- Asset Card 2: STP Plant -->
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20 relative overflow-hidden">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs text-slate-400 font-semibold uppercase">STP Water Plant</span>
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-2xl font-bold font-cinzel text-slate-100">Grade A Clean</span>
+                    </div>
+                    <div class="mt-2 text-xs text-slate-400">Output: <strong class="text-blue-400">220 KLD Treated</strong></div>
+                    <div class="mt-2 w-full bg-slate-800 rounded-full h-1.5">
+                        <div class="bg-blue-400 h-1.5 rounded-full" style="width: 95%"></div>
+                    </div>
+                </div>
+
+                <!-- Asset Card 3: Elevators / Lifts -->
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20 relative overflow-hidden">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs text-slate-400 font-semibold uppercase">OTIS Passenger Lifts</span>
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-2xl font-bold font-cinzel text-slate-100">14 / 14 Active</span>
+                    </div>
+                    <div class="mt-2 text-xs text-slate-400">Next Service Due: <strong class="text-amber-300">Oct 28, 2026</strong></div>
+                    <div class="mt-2 w-full bg-slate-800 rounded-full h-1.5">
+                        <div class="bg-emerald-400 h-1.5 rounded-full" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <!-- Asset Card 4: CCTV Network -->
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20 relative overflow-hidden">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs text-slate-400 font-semibold uppercase">CCTV Surveillance</span>
+                        <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-2xl font-bold font-cinzel text-slate-100">124 / 128 Cameras</span>
+                    </div>
+                    <div class="mt-2 text-xs text-slate-400">4 Cameras Under Calibration</div>
+                    <div class="mt-2 w-full bg-slate-800 rounded-full h-1.5">
+                        <div class="bg-amber-400 h-1.5 rounded-full" style="width: 96%"></div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Ticket Management Bar & Log Modal Trigger -->
+            <div class="glass-card rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between border border-amber-500/20">
+                <div class="flex items-center gap-3 w-full sm:w-auto">
+                    <h3 class="font-cinzel text-lg font-bold text-amber-300">Maintenance Ticket Log</h3>
+                    <span id="ticketCountBadge" class="bg-amber-500/20 text-amber-300 text-xs px-2.5 py-0.5 rounded-full border border-amber-500/30">5 Open</span>
+                </div>
+
+                <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
+                    <select id="ticketFilterStatus" onchange="renderInfraTickets()" class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-lg px-3 py-2 outline-none">
+                        <option value="ALL">All Statuses</option>
+                        <option value="Open">Open</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Resolved">Resolved</option>
+                    </select>
+
+                    <button onclick="openNewTicketModal()" class="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-bold text-xs rounded-lg shadow-md transition-all flex items-center gap-2 whitespace-nowrap">
+                        <i class="fa-solid fa-circle-plus"></i> Raise Infra Ticket
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tickets List / Pipeline Container -->
+            <div id="ticketsContainer" class="space-y-4">
+                <!-- Dynamically populated via JS -->
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="mt-12 bg-[#060b14] border-t border-amber-500/20 py-8 text-xs text-slate-400">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <span class="font-cinzel text-base font-bold text-amber-400">SOBHA WINDSOR</span>
+                <span>•</span>
+                <span>Bengaluru's English Victorian Masterpiece</span>
+            </div>
+            <div class="flex items-center gap-6 text-slate-400">
+                <span>Central Helpdesk: +91 80 4900 1122</span>
+                <a href="#policy" onclick="switchTab('policy')" class="hover:text-amber-300 transition-colors">Bylaws</a>
+                <a href="#infra" onclick="switchTab('infra')" class="hover:text-amber-300 transition-colors">Infra Status</a>
+            </div>
+            <div class="text-slate-400">
+                &copy; 2026 Sobha Windsor Owners Association (SWOA).
+            </div>
+        </div>
+    </footer>
+
+    <!-- ================= MODALS SECTION ================= -->
+
+    <!-- 1. AUTHENTICATION / CHANGE USER MODAL -->
+    <div id="authModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="glass-card max-w-md w-full rounded-2xl p-6 border-2 border-amber-500/40 shadow-2xl relative">
+            <button onclick="closeAuthModal()" class="absolute top-4 right-4 text-slate-400 hover:text-amber-400">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+            <div class="text-center mb-6">
+                <div class="w-14 h-14 mx-auto rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 p-0.5 mb-3">
+                    <div class="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
+                        <i class="fa-solid fa-user-shield text-2xl gold-text-gradient"></i>
+                    </div>
+                </div>
+                <h3 class="font-cinzel text-xl font-bold text-slate-100">Resident Portal Switch / Login</h3>
+                <p class="text-xs text-slate-400 mt-1">Select demo resident profile or input custom flat credentials</p>
+            </div>
+
+            <!-- Demo Persona Selector Buttons -->
+            <div class="space-y-2 mb-5">
+                <label class="text-[11px] uppercase font-semibold text-amber-400 font-mono tracking-wider">Quick Switch Presets:</label>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="selectPresetUser('Eleanor Vance', 'Block A-304', 'Owner', 'eleanor@sobhawindsor.com', 'KA-03-MN-8899')" class="p-2.5 rounded-lg bg-slate-900 border border-amber-500/30 hover:border-amber-400 text-left text-xs flex items-center gap-2">
+                        <div class="w-2 h-2 rounded-full bg-amber-400"></div>
+                        <div>
+                            <div class="font-semibold text-slate-200">Eleanor (Owner)</div>
+                            <div class="text-[10px] text-slate-400">Block A-304</div>
+                        </div>
+                    </button>
+                    <button onclick="selectPresetUser('Marcus Sterling', 'Block C-102', 'Tenant', 'marcus.s@techcorp.io', 'KA-01-EV-2024')" class="p-2.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-amber-400 text-left text-xs flex items-center gap-2">
+                        <div class="w-2 h-2 rounded-full bg-blue-400"></div>
+                        <div>
+                            <div class="font-semibold text-slate-200">Marcus (Resident)</div>
+                            <div class="text-[10px] text-slate-400">Block C-102</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Manual Custom Entry Form -->
+            <form onsubmit="handleManualLogin(event)" class="space-y-3 border-t border-slate-800 pt-4">
+                <div>
+                    <label class="text-xs text-slate-300 font-medium">Resident Full Name</label>
+                    <input type="text" id="authInputName" required placeholder="e.g. Dr. Rajesh Sharma" class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs text-slate-300 font-medium">Block & Flat #</label>
+                        <input type="text" id="authInputFlat" required placeholder="Block B-201" class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-300 font-medium">Role Type</label>
+                        <select id="authInputRole" class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1">
+                            <option value="Owner">Primary Owner</option>
+                            <option value="Tenant">Resident / Tenant</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button type="submit" class="w-full mt-2 py-3 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-lg">
+                    Confirm & Load Profile
+                </button>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- 2. PAYMENT GATEWAY MODAL -->
+    <div id="paymentGatewayModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="glass-card max-w-lg w-full rounded-2xl p-6 border-2 border-amber-500/40 shadow-2xl relative">
+            <button onclick="closePaymentModal()" class="absolute top-4 right-4 text-slate-400 hover:text-amber-400">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+            <div class="flex items-center gap-3 mb-6 border-b border-amber-500/20 pb-4">
+                <div class="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/40">
+                    <i class="fa-solid fa-shield-halved text-lg"></i>
+                </div>
+                <div>
+                    <h3 class="font-cinzel text-lg font-bold text-slate-100">Sobha Windsor Payment Portal</h3>
+                    <div class="text-xs text-slate-400">Encrypted 256-Bit Financial Gateway</div>
+                </div>
+            </div>
+
+            <div class="bg-slate-900/90 rounded-xl p-4 border border-slate-800 mb-5">
+                <div class="flex justify-between text-xs text-slate-400 mb-1">
+                    <span>Payee Unit:</span>
+                    <strong class="text-slate-200" id="payModalFlat">Block A-304</strong>
+                </div>
+                <div class="flex justify-between text-xs text-slate-400 mb-1">
+                    <span>Invoice Period:</span>
+                    <strong class="text-slate-200">Q3 Maintenance Fee (July - Sept 2026)</strong>
+                </div>
+                <div class="flex justify-between text-sm font-bold text-amber-300 border-t border-slate-800 pt-2 mt-2">
+                    <span>Total Amount Due:</span>
+                    <span class="text-base font-cinzel">₹22,150.00</span>
+                </div>
+            </div>
+
+            <!-- Payment Options -->
+            <div class="space-y-3 mb-6">
+                <label class="text-xs text-slate-300 font-semibold">Select Payment Mode:</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <label class="border border-amber-500/50 bg-amber-500/10 rounded-xl p-3 text-center cursor-pointer flex flex-col items-center justify-center gap-1">
+                        <input type="radio" name="payMode" value="UPI" checked class="accent-amber-500 hidden">
+                        <i class="fa-solid fa-qrcode text-amber-400 text-lg"></i>
+                        <span class="text-[11px] font-semibold text-slate-200">UPI / QR Code</span>
+                    </label>
+                    <label class="border border-slate-800 bg-slate-900 rounded-xl p-3 text-center cursor-pointer flex flex-col items-center justify-center gap-1 hover:border-slate-700">
+                        <input type="radio" name="payMode" value="NetBanking" class="accent-amber-500 hidden">
+                        <i class="fa-solid fa-building-columns text-slate-400 text-lg"></i>
+                        <span class="text-[11px] font-semibold text-slate-300">NetBanking</span>
+                    </label>
+                    <label class="border border-slate-800 bg-slate-900 rounded-xl p-3 text-center cursor-pointer flex flex-col items-center justify-center gap-1 hover:border-slate-700">
+                        <input type="radio" name="payMode" value="Card" class="accent-amber-500 hidden">
+                        <i class="fa-solid fa-credit-card text-slate-400 text-lg"></i>
+                        <span class="text-[11px] font-semibold text-slate-300">Credit / Debit</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Submit Mock Pay -->
+            <button onclick="processMockPayment()" id="processPayBtn" class="w-full py-3.5 bg-gradient-to-r from-emerald-500 via-emerald-600 to-emerald-700 hover:from-emerald-400 hover:to-emerald-600 text-slate-950 font-bold text-sm rounded-xl shadow-xl transition-all flex items-center justify-center gap-2">
+                <i class="fa-solid fa-[#101e33] fa-lock"></i> Authorize Payment (₹22,150.00)
+            </button>
+        </div>
+    </div>
+
+
+    <!-- 3. PRINTABLE RECEIPT MODAL -->
+    <div id="printableReceiptModal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white text-slate-900 max-w-lg w-full rounded-2xl p-6 sm:p-8 shadow-2xl border-4 border-amber-600 relative">
+            <button onclick="closeReceiptModal()" class="absolute top-4 right-4 text-slate-500 hover:text-slate-900 print:hidden">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+
+            <!-- Victorian Header Monogram -->
+            <div class="text-center border-b-2 border-slate-900 pb-4 mb-4">
+                <div class="font-cinzel text-2xl font-bold tracking-widest text-slate-900">SOBHA WINDSOR</div>
+                <div class="text-xs text-amber-800 font-serif italic">Owners Association Maintenance Official Receipt</div>
+                <div class="text-[10px] text-slate-500 font-mono mt-1">Whitefield Main Road, EPIP Zone, Bengaluru, Karnataka 560066</div>
+            </div>
+
+            <div class="flex justify-between text-xs font-mono mb-4 text-slate-700 bg-slate-100 p-2.5 rounded">
+                <div>
+                    <div>Receipt No: <strong id="recModalNo">REC-2026-Q3-304</strong></div>
+                    <div>Date Paid: <span id="recModalDate">12 Oct 2026</span></div>
+                </div>
+                <div class="text-right">
+                    <div>Payment Mode: <strong id="recModalMode">UPI Transfer</strong></div>
+                    <div>Status: <span class="text-emerald-700 font-bold">PAID (SUCCESS)</span></div>
+                </div>
+            </div>
+
+            <!-- Particulars Table -->
+            <table class="w-full text-xs text-left mb-6 border-collapse">
+                <thead>
+                    <tr class="border-b border-slate-300 font-bold text-slate-800">
+                        <th class="py-2">Description</th>
+                        <th class="py-2 text-right">Amount (INR)</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200">
+                    <tr>
+                        <td class="py-2">Quarterly Maintenance Fee (1,845 Sq. Ft @ ₹10/sqft)</td>
+                        <td class="py-2 text-right">₹18,450.00</td>
+                    </tr>
+                    <tr>
+                        <td class="py-2">Sub-metered Water Consumption Charges</td>
+                        <td class="py-2 text-right">₹1,200.00</td>
+                    </tr>
+                    <tr>
+                        <td class="py-2">Corpus Reserve Sinking Fund Allocation</td>
+                        <td class="py-2 text-right">₹2,500.00</td>
+                    </tr>
+                </tbody>
+                <tfoot>
+                    <tr class="border-t-2 border-slate-900 font-bold text-sm">
+                        <td class="py-2">Total Amount Paid:</td>
+                        <td class="py-2 text-right font-cinzel text-amber-900">₹22,150.00</td>
+                    </tr>
+                </tfoot>
+            </table>
+
+            <div class="text-[10px] text-slate-500 italic text-center mb-6">
+                This is a computer-generated official receipt issued by Sobha Windsor Association. No physical signature required.
+            </div>
+
+            <div class="flex gap-3 print:hidden">
+                <button onclick="window.print()" class="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-print"></i> Print / Save PDF
+                </button>
+                <button onclick="closeReceiptModal()" class="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold rounded-lg">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 4. NEW INFRA TICKET MODAL -->
+    <div id="newTicketModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="glass-card max-w-lg w-full rounded-2xl p-6 border-2 border-amber-500/40 shadow-2xl relative">
+            <button onclick="closeNewTicketModal()" class="absolute top-4 right-4 text-slate-400 hover:text-amber-400">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+            <div class="mb-5">
+                <h3 class="font-cinzel text-xl font-bold text-slate-100 flex items-center gap-2">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Raise Infrastructure Ticket
+                </h3>
+                <p class="text-xs text-slate-400 mt-1">Log issues regarding lifts, STP, power backup, plumbing, or amenities.</p>
+            </div>
+
+            <form onsubmit="handleTicketSubmit(event)" class="space-y-4">
+                <div>
+                    <label class="text-xs text-slate-300 font-medium">Issue Title / Subject</label>
+                    <input type="text" id="ticketTitle" required placeholder="e.g. Lift #2 in Block A making squeaking sound" class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs text-slate-300 font-medium">Infrastructure Category</label>
+                        <select id="ticketCategory" class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1">
+                            <option value="Elevators">Elevator / Lift</option>
+                            <option value="Electrical">Power Backup / DG / Solar</option>
+                            <option value="Plumbing">Water Supply / STP / Meter</option>
+                            <option value="Security">CCTV / Boom Barrier</option>
+                            <option value="Amenities">Clubhouse / Swimming Pool</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-300 font-medium">Priority Level</label>
+                        <select id="ticketPriority" class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1">
+                            <option value="Low">Low (General Query)</option>
+                            <option value="Medium" selected>Medium (Standard Maintenance)</option>
+                            <option value="High">High (Urgent Attention)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs text-slate-300 font-medium">Detailed Description & Location</label>
+                    <textarea id="ticketDesc" rows="3" required placeholder="Provide specific details, block floor # or asset identifier..." class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1"></textarea>
+                </div>
+
+                <button type="submit" class="w-full py-3 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-paper-plane"></i> Submit Ticket to Facility Manager
+                </button>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- 5. EDIT PROFILE MODAL -->
+    <div id="editProfileModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="glass-card max-w-md w-full rounded-2xl p-6 border-2 border-amber-500/40 shadow-2xl relative">
+            <button onclick="closeEditProfileModal()" class="absolute top-4 right-4 text-slate-400 hover:text-amber-400">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+            <div class="mb-4">
+                <h3 class="font-cinzel text-lg font-bold text-slate-100">Update Unit Details</h3>
+                <p class="text-xs text-slate-400">Update registered vehicle numbers or resident contacts</p>
+            </div>
+
+            <form onsubmit="handleUpdateProfile(event)" class="space-y-3">
+                <div>
+                    <label class="text-xs text-slate-300 font-medium">Vehicle Plate Numbers</label>
+                    <input type="text" id="editVehicle" value="KA-03-MN-8899" class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-300 font-medium">Emergency Phone Contact</label>
+                    <input type="text" id="editPhone" value="+91 98860 12345" class="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs p-2.5 text-slate-100 focus:border-amber-400 outline-none mt-1">
+                </div>
+                <button type="submit" class="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs rounded-xl transition-all">
+                    Save Changes
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        
+        // Active User Profile State
+        let currentUserProfile = {
+            name: 'Eleanor Vance',
+            flat: 'Block A-304',
+            role: 'Owner',
+            email: 'eleanor@sobhawindsor.com',
+            vehicle: 'KA-03-MN-8899',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120',
+            duesPaid: false
+        };
+
+        // 1. Owners Directory Dataset
+        let ownersData = [
+            { flat: 'Block A-304', name: 'Eleanor Vance', role: 'Owner', occupancy: 'Self Occupied', phone: '+91 98860 12345', vehicle: 'KA-03-MN-8899', parking: 'B1-Slot 142' },
+            { flat: 'Block A-102', name: 'Dr. S. K. Nambiar', role: 'Owner', occupancy: 'Self Occupied', phone: '+91 98450 99881', vehicle: 'KA-03-MB-1102', parking: 'B1-Slot 012' },
+            { flat: 'Block B-201', name: 'Vikram & Ananya Sethi', role: 'Owner', occupancy: 'Self Occupied', phone: '+91 99001 22334', vehicle: 'KA-53-Z-9090', parking: 'B1-Slot 201' },
+            { flat: 'Block C-102', name: 'Marcus Sterling', role: 'Resident (Tenant)', occupancy: 'Tenant Rented', phone: '+91 97411 55443', vehicle: 'KA-01-EV-2024', parking: 'B2-Slot 054' },
+            { flat: 'Block C-404', name: 'Rajesh & Meera Rao', role: 'Owner', occupancy: 'Self Occupied', phone: '+91 98800 33221', vehicle: 'KA-03-PP-4404', parking: 'B2-Slot 110' },
+            { flat: 'Block D-302', name: 'David Miller', role: 'Resident (Tenant)', occupancy: 'Tenant Rented', phone: '+91 96112 88776', vehicle: 'KA-03-MQ-7711', parking: 'B2-Slot 208' },
+        ];
+
+        // 2. Policy Dataset
+        let policiesData = [
+            { category: 'Move-In', title: 'Move-In & Move-Out Procedures', icon: 'fa-truck-ramp-box', detail: 'Move-in/out heavy shifting permitted strictly between 9:00 AM – 6:00 PM (Mon to Sat). Prior NOC required 48 hrs in advance.', fine: '₹5,000 fine for unapproved timing' },
+            { category: 'Clubhouse', title: 'Tudor Hall Clubhouse & Pool Rules', icon: 'fa-person-swimming', detail: 'Synthetic swimwear mandatory. Guests allowed (max 4 per flat) with ₹200 guest pass. Pool operational 6:00 AM – 10:00 PM.', fine: '₹1,000 violation penalty' },
+            { category: 'Renovation', title: 'Interior Modification Bylaws', icon: 'fa-hammer', detail: 'No structural modifications to load-bearing columns. Drilling & noisy work restricted to 10 AM - 5 PM on weekdays only.', fine: 'Work stoppage order + ₹10,000 fine' },
+            { category: 'Pets', title: 'Pet Ownership Guidelines', icon: 'fa-dog', detail: 'Pets must be leashed at all times in common corridors and basements. Designated pet relief zone near Block D lawn. Owners must scoop poop.', fine: '₹2,000 fine per offense' },
+            { category: 'Parking', title: 'Visitor & Resident Parking Protocol', icon: 'fa-square-parking', detail: 'Strictly park inside allocated basement slots. Visitor parking limited to 24 consecutive hours with MyGate code approval.', fine: 'Vehicle wheel clamp + ₹1,500 unclamp fee' },
+        ];
+
+        // 3. Vendors Dataset
+        let vendorsData = [
+            { name: 'PIS Security Forces', category: 'Security', rating: '4.9', contact: '+91 80 4900 1199', sla: '99.8% SLA', status: 'Active Contract', logoIcon: 'fa-shield-halved', desc: '24/7 Gate security, perimeter laser beam, and visitor verification.' },
+            { name: 'GAIL Piped Natural Gas', category: 'Utilities', rating: '4.8', contact: '1800 102 9282', sla: 'Emergency 24x7', status: 'Utility Line', logoIcon: 'fa-fire-flame-curved', desc: 'Direct pipeline gas supply to all kitchen counter connections.' },
+            { name: 'Otis Elevator India', category: 'Elevators', rating: '4.7', contact: '+91 80 2211 4455', sla: '2 hr Breakdown Response', status: 'AMC Active', logoIcon: 'fa-elevator', desc: 'Monthly safety inspection & continuous elevator health telemetry.' },
+            { name: 'Ion Exchange STP & WTP', category: 'Maintenance', rating: '4.6', contact: '+91 98451 00223', sla: 'On-site Engineers', status: 'Daily Sampling', logoIcon: 'fa-droplet', desc: 'Dual-line sewage treatment and hydro-pneumatic water pressurization.' },
+            { name: 'Sobha Care Housekeeping', category: 'Housekeeping', rating: '4.9', contact: '+91 80 4900 1100', sla: 'Daily Cleaning', status: 'Active', logoIcon: 'fa-broom', desc: 'Victorian corridor marble polishing, landscaping, and waste segregation.' },
+        ];
+
+        // 4. Infrastructure Tickets Dataset (Fallback + Live state)
+        window.ticketsData = [
+            { id: 'TCK-1092', title: 'Hydro Pump #3 Pressure Drop in Block B', category: 'Plumbing', priority: 'High', status: 'In Progress', desc: 'Pressure dropping during peak morning hours (7 AM - 9 AM). Engineer dispatched.', createdAt: '2026-10-12T08:30:00Z', upvotes: 4 },
+            { id: 'TCK-1088', title: 'EV Charger #2 Station Screen Error', category: 'Electrical', priority: 'Medium', status: 'Open', desc: 'Display screen frozen at Basement 1 EV charging dock.', createdAt: '2026-10-11T14:20:00Z', upvotes: 2 },
+            { id: 'TCK-1075', title: 'Tudor Hall Gym AC Servicing', category: 'Amenities', priority: 'Low', status: 'Resolved', desc: 'Filters cleaned and refrigerant recharged.', createdAt: '2026-10-09T10:00:00Z', upvotes: 1 },
+        ];
+
+        // ================= TAB NAVIGATION LOGIC =================
+        function switchTab(tabId) {
+            // Hide all contents
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            
+            // Unhighlight all buttons
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('text-amber-400', 'bg-amber-500/10', 'border-amber-500/30', 'border');
+                btn.classList.add('text-slate-400');
+            });
+
+            // Show selected tab content
+            const target = document.getElementById(`tab-${tabId}`);
+            if (target) target.classList.remove('hidden');
+
+            // Highlight selected nav button
+            const activeBtn = document.getElementById(`nav-${tabId}`);
+            if (activeBtn) {
+                activeBtn.classList.remove('text-slate-400');
+                activeBtn.classList.add('text-amber-400', 'bg-amber-500/10', 'border-amber-500/30', 'border');
+            }
+
+            // Trigger specific tab renders
+            if (tabId === 'owner') renderOwnersTable();
+            if (tabId === 'policy') renderPolicies();
+            if (tabId === 'finance') renderFinanceHistory();
+            if (tabId === 'vendors') renderVendors();
+            if (tabId === 'infra') renderInfraTickets();
+        }
+
+        function toggleMobileMenu() {
+            const menu = document.getElementById('mobileMenu');
+            menu.classList.toggle('hidden');
+        }
+
+
+        // ================= TAB 1: OWNER TAB RENDER =================
+        function renderOwnersTable() {
+            const tbody = document.getElementById('ownersTableBody');
+            if (!tbody) return;
+
+            const search = document.getElementById('ownerSearchInput').value.toLowerCase();
+            const block = document.getElementById('blockFilter').value;
+            const type = document.getElementById('typeFilter').value;
+
+            const filtered = ownersData.filter(item => {
+                const matchesSearch = item.flat.toLowerCase().includes(search) || item.name.toLowerCase().includes(search) || item.vehicle.toLowerCase().includes(search);
+                const matchesBlock = block === 'ALL' || item.flat.startsWith(block);
+                const matchesType = type === 'ALL' || item.occupancy === type;
+                return matchesSearch && matchesBlock && matchesType;
+            });
+
+            tbody.innerHTML = filtered.map(item => `
+                <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3.5 px-4 font-mono font-bold text-amber-300">
+                        ${item.flat}
+                    </td>
+                    <td class="py-3.5 px-4 font-semibold text-slate-100">
+                        ${item.name}
+                    </td>
+                    <td class="py-3.5 px-4 text-xs font-mono">
+                        ${item.phone}
+                    </td>
+                    <td class="py-3.5 px-4">
+                        <span class="text-xs px-2.5 py-1 rounded-full font-medium ${item.occupancy === 'Self Occupied' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-blue-500/10 text-blue-400 border border-blue-500/30'}">
+                            ${item.occupancy}
+                        </span>
+                    </td>
+                    <td class="py-3.5 px-4 text-xs">
+                        <div class="font-mono text-slate-200">${item.vehicle}</div>
+                        <div class="text-[10px] text-slate-400">${item.parking}</div>
+                    </td>
+                    <td class="py-3.5 px-4 text-right">
+                        <button onclick="contactResident('${item.name}', '${item.phone}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs rounded border border-amber-500/20">
+                            <i class="fa-solid fa-phone text-[10px] mr-1"></i> Contact
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function filterOwners() {
+            renderOwnersTable();
+        }
+
+        function contactResident(name, phone) {
+            alert(`Direct Resident Calling Hotline:\nConnecting to ${name} at ${phone}...`);
+        }
+
+
+        // ================= TAB 2: POLICY TAB RENDER =================
+        let activePolicyCategory = 'ALL';
+
+        function renderPolicies() {
+            const grid = document.getElementById('policiesGrid');
+            if (!grid) return;
+
+            const search = document.getElementById('policySearchInput').value.toLowerCase();
+
+            const filtered = policiesData.filter(p => {
+                const matchesCat = activePolicyCategory === 'ALL' || p.category === activePolicyCategory;
+                const matchesSearch = p.title.toLowerCase().includes(search) || p.detail.toLowerCase().includes(search);
+                return matchesCat && matchesSearch;
+            });
+
+            grid.innerHTML = filtered.map(p => `
+                <div class="glass-card rounded-xl p-5 border border-amber-500/20 glass-card-hover transition-all">
+                    <div class="flex items-start gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
+                            <i class="fa-solid ${p.icon} text-xl"></i>
+                        </div>
+                        <div class="flex-grow">
+                            <div class="text-[10px] uppercase font-mono tracking-widest text-amber-400 font-semibold mb-1">${p.category} Section</div>
+                            <h3 class="font-cinzel text-base font-bold text-slate-100 mb-2">${p.title}</h3>
+                            <p class="text-xs text-slate-300 leading-relaxed mb-3">${p.detail}</p>
+                            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-900/30 text-amber-300 border border-amber-500/30 text-[11px] font-mono">
+                                <i class="fa-solid fa-triangle-exclamation"></i> ${p.fine}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterPolicyCategory(cat) {
+            activePolicyCategory = cat;
+            document.querySelectorAll('.policy-cat-btn').forEach(btn => {
+                btn.classList.remove('active-policy-cat', 'border-amber-500/40');
+                btn.classList.add('bg-slate-900', 'border-slate-800', 'text-slate-300');
+            });
+            event.target.classList.add('active-policy-cat', 'border-amber-500/40');
+            event.target.classList.remove('bg-slate-900', 'border-slate-800', 'text-slate-300');
+            renderPolicies();
+        }
+
+        function filterPolicies() {
+            renderPolicies();
+        }
+
+        function downloadPolicyPDF() {
+            alert('Downloading Official Sobha Windsor Community Bylaws & Resident Handbook (2026 Edition PDF)...');
+        }
+
+
+        // ================= TAB 3: FINANCE TAB RENDER =================
+        function renderFinanceHistory() {
+            const table = document.getElementById('financeHistoryTable');
+            if (!table) return;
+
+            document.getElementById('financeFlatHeader').innerText = currentUserProfile.flat;
+
+            const payments = [
+                { id: 'REC-2026-Q3-304', period: 'Q3 2026 (Jul-Sep)', amount: '₹22,150.00', method: currentUserProfile.duesPaid ? 'UPI' : 'Pending', date: currentUserProfile.duesPaid ? 'Oct 12, 2026' : '-', status: currentUserProfile.duesPaid ? 'Paid' : 'Unpaid' },
+                { id: 'REC-2026-Q2-304', period: 'Q2 2026 (Apr-Jun)', amount: '₹21,800.00', method: 'UPI / HDFC', date: 'Jul 04, 2026', status: 'Paid' },
+                { id: 'REC-2026-Q1-304', period: 'Q1 2026 (Jan-Mar)', amount: '₹21,800.00', method: 'NetBanking', date: 'Apr 02, 2026', status: 'Paid' },
+            ];
+
+            table.innerHTML = payments.map(p => `
+                <tr class="hover:bg-slate-900/60 transition-colors">
+                    <td class="py-3 px-4 font-mono text-xs font-semibold text-amber-300">${p.id}</td>
+                    <td class="py-3 px-4 text-xs">${p.period}</td>
+                    <td class="py-3 px-4 font-mono font-bold text-slate-100">${p.amount}</td>
+                    <td class="py-3 px-4 text-xs text-slate-400">${p.method}</td>
+                    <td class="py-3 px-4 text-xs">${p.date}</td>
+                    <td class="py-3 px-4">
+                        <span class="text-[11px] px-2 py-0.5 rounded font-semibold ${p.status === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">
+                            ${p.status}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 text-right">
+                        ${p.status === 'Paid' ? `
+                            <button onclick="openReceiptModal('${p.id}')" class="text-xs text-amber-400 hover:underline">
+                                <i class="fa-solid fa-download"></i> Receipt
+                            </button>
+                        ` : `
+                            <button onclick="openPaymentGatewayModal()" class="text-xs text-emerald-400 font-bold hover:underline">
+                                Pay Now
+                            </button>
+                        `}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function openPaymentGatewayModal() {
+            document.getElementById('payModalFlat').innerText = currentUserProfile.flat;
+            document.getElementById('paymentGatewayModal').classList.remove('hidden');
+        }
+
+        function closePaymentModal() {
+            document.getElementById('paymentGatewayModal').classList.add('hidden');
+        }
+
+        function processMockPayment() {
+            const btn = document.getElementById('processPayBtn');
+            btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing Payment via Gateway...`;
+            
+            setTimeout(() => {
+                currentUserProfile.duesPaid = true;
+                btn.innerHTML = `<i class="fa-solid fa-check"></i> Payment Approved!`;
+                
+                // Update Dues Card UI
+                document.getElementById('dueAmountDisplay').innerText = "₹0.00";
+                document.getElementById('dueStatusBadge').className = "text-xs px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-semibold";
+                document.getElementById('dueStatusBadge').innerText = "All Dues Cleared";
+
+                setTimeout(() => {
+                    closePaymentModal();
+                    openReceiptModal('REC-2026-Q3-304');
+                    renderFinanceHistory();
+                }, 800);
+            }, 1200);
+        }
+
+        function openReceiptModal(receiptId) {
+            document.getElementById('recModalNo').innerText = receiptId;
+            document.getElementById('recModalDate').innerText = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+            document.getElementById('printableReceiptModal').classList.remove('hidden');
+        }
+
+        function closeReceiptModal() {
+            document.getElementById('printableReceiptModal').classList.add('hidden');
+        }
+
+
+        // ================= TAB 4: VENDORS TAB RENDER =================
+        function renderVendors() {
+            const grid = document.getElementById('vendorsGrid');
+            if (!grid) return;
+
+            const search = document.getElementById('vendorSearchInput').value.toLowerCase();
+            const cat = document.getElementById('vendorCategorySelect').value;
+
+            const filtered = vendorsData.filter(v => {
+                const matchesSearch = v.name.toLowerCase().includes(search) || v.desc.toLowerCase().includes(search);
+                const matchesCat = cat === 'ALL' || v.category === cat;
+                return matchesSearch && matchesCat;
+            });
+
+            grid.innerHTML = filtered.map(v => `
+                <div class="glass-card rounded-xl p-5 border border-amber-500/20 glass-card-hover transition-all flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                                <i class="fa-solid ${v.logoIcon} text-lg"></i>
+                            </div>
+                            <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium">
+                                ${v.status}
+                            </span>
+                        </div>
+                        <h3 class="font-cinzel text-base font-bold text-slate-100">${v.name}</h3>
+                        <div class="text-[11px] text-amber-300 font-mono mt-0.5">${v.category} Service</div>
+                        <p class="text-xs text-slate-300 mt-2 leading-relaxed">${v.desc}</p>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+                        <div class="flex items-center gap-1 text-amber-400 font-semibold">
+                            <i class="fa-solid fa-star"></i> ${v.rating} <span class="text-[10px] text-slate-400">(${v.sla})</span>
+                        </div>
+                        <button onclick="callVendor('${v.name}', '${v.contact}')" class="px-3 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded border border-amber-500/30 font-medium">
+                            <i class="fa-solid fa-phone text-[10px] mr-1"></i> Call Contractor
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterVendors() {
+            renderVendors();
+        }
+
+        function callVendor(name, number) {
+            alert(`Connecting Hotline to ${name}:\nPhone Number: ${number}`);
+        }
+
+        function openVendorRequestModal() {
+            alert('Opening Special Vendor Request Form. You can request deep cleaning, balcony pigeon nets, or AC servicing with pre-negotiated Sobha rates.');
+        }
+
+
+        // ================= TAB 5: INFRASTRUCTURE & TICKETS =================
+        function renderInfraTickets() {
+            const container = document.getElementById('ticketsContainer');
+            if (!container) return;
+
+            const filterStatus = document.getElementById('ticketFilterStatus').value;
+            const tickets = window.ticketsData || [];
+
+            const filtered = tickets.filter(t => filterStatus === 'ALL' || t.status === filterStatus);
+
+            document.getElementById('ticketCountBadge').innerText = `${tickets.filter(t => t.status !== 'Resolved').length} Active`;
+
+            container.innerHTML = filtered.map(t => `
+                <div class="glass-card rounded-xl p-4 border border-amber-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div class="flex items-start gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center shrink-0 mt-1">
+                            <i class="fa-solid ${getTicketCategoryIcon(t.category)} text-amber-400"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-mono text-xs text-amber-300 font-bold">${t.id}</span>
+                                <span class="text-xs px-2 py-0.5 rounded font-semibold ${getPriorityBadgeClass(t.priority)}">
+                                    ${t.priority} Priority
+                                </span>
+                                <span class="text-xs px-2 py-0.5 rounded font-semibold ${getStatusBadgeClass(t.status)}">
+                                    ${t.status}
+                                </span>
+                            </div>
+                            <h4 class="font-bold text-slate-100 text-sm mt-1">${t.title}</h4>
+                            <p class="text-xs text-slate-300 mt-1">${t.desc}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between md:justify-end gap-3 w-full md:w-auto border-t md:border-t-0 border-slate-800 pt-3 md:pt-0">
+                        <button onclick="upvoteTicket('${t.id}')" class="px-3 py-1.5 rounded bg-slate-900 border border-slate-700 hover:border-amber-400 text-xs text-slate-300 flex items-center gap-1.5">
+                            <i class="fa-solid fa-thumbs-up text-amber-400"></i> Upvote (${t.upvotes || 1})
+                        </button>
+                        <button onclick="viewTicketTimeline('${t.id}')" class="px-3 py-1.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 text-xs font-semibold">
+                            Live Updates
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getTicketCategoryIcon(cat) {
+            if (cat === 'Elevators') return 'fa-elevator';
+            if (cat === 'Electrical') return 'fa-bolt';
+            if (cat === 'Plumbing') return 'fa-droplet';
+            if (cat === 'Security') return 'fa-video';
+            return 'fa-wrench';
+        }
+
+        function getPriorityBadgeClass(p) {
+            if (p === 'High') return 'bg-rose-500/20 text-rose-300 border border-rose-500/30';
+            if (p === 'Medium') return 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
+            return 'bg-blue-500/20 text-blue-300 border border-blue-500/30';
+        }
+
+        function getStatusBadgeClass(s) {
+            if (s === 'Resolved') return 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+            if (s === 'In Progress') return 'bg-blue-500/20 text-blue-300 border border-blue-500/30';
+            return 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
+        }
+
+        function openNewTicketModal() {
+            document.getElementById('newTicketModal').classList.remove('hidden');
+        }
+
+        function closeNewTicketModal() {
+            document.getElementById('newTicketModal').classList.add('hidden');
+        }
+
+        async function handleTicketSubmit(e) {
+            e.preventDefault();
+            const newTicket = {
+                id: 'TCK-' + Math.floor(1000 + Math.random() * 9000),
+                title: document.getElementById('ticketTitle').value,
+                category: document.getElementById('ticketCategory').value,
+                priority: document.getElementById('ticketPriority').value,
+                desc: document.getElementById('ticketDesc').value,
+                status: 'Open',
+                upvotes: 1
+            };
+
+            // Save to Firestore if connected
+            if (window.saveTicketToFirebase) {
+                await window.saveTicketToFirebase(newTicket);
+            }
+
+            // Update local memory
+            window.ticketsData.unshift(newTicket);
+            renderInfraTickets();
+            closeNewTicketModal();
+            alert(`Ticket #${newTicket.id} logged successfully! Facility manager notified.`);
+        }
+
+        function upvoteTicket(id) {
+            const ticket = window.ticketsData.find(t => t.id === id);
+            if (ticket) {
+                ticket.upvotes = (ticket.upvotes || 1) + 1;
+                renderInfraTickets();
+            }
+        }
+
+        function viewTicketTimeline(id) {
+            alert(`Ticket ${id} Status Updates:\n\n- Logged by Resident\n- Assigned to Senior Facility Manager\n- Inspection scheduled within 4 hours.`);
+        }
+
+
+        // ================= AUTH & PROFILE SWITCHING LOGIC =================
+        function openAuthModal() {
+            document.getElementById('authModal').classList.remove('hidden');
+        }
+
+        function closeAuthModal() {
+            document.getElementById('authModal').classList.add('hidden');
+        }
+
+        function selectPresetUser(name, flat, role, email, vehicle) {
+            currentUserProfile.name = name;
+            currentUserProfile.flat = flat;
+            currentUserProfile.role = role;
+            currentUserProfile.email = email;
+            currentUserProfile.vehicle = vehicle;
+            currentUserProfile.avatar = role === 'Owner' 
+                ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120'
+                : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120';
+            
+            updateProfileUI();
+            closeAuthModal();
+        }
+
+        function handleManualLogin(e) {
+            e.preventDefault();
+            currentUserProfile.name = document.getElementById('authInputName').value;
+            currentUserProfile.flat = document.getElementById('authInputFlat').value;
+            currentUserProfile.role = document.getElementById('authInputRole').value;
+            
+            updateProfileUI();
+            closeAuthModal();
+        }
+
+        function updateProfileUI() {
+            document.getElementById('userNameDisplay').innerText = currentUserProfile.name;
+            document.getElementById('userFlatDisplay').innerText = currentUserProfile.flat;
+            document.getElementById('userRoleBadge').innerText = currentUserProfile.role;
+            document.getElementById('userAvatar').src = currentUserProfile.avatar;
+            document.getElementById('myFlatCardStatus').innerHTML = `
+                <span>${currentUserProfile.flat}</span>
+                <span class="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">${currentUserProfile.role}</span>
+            `;
+
+            // Refresh views with updated user profile
+            renderOwnersTable();
+            renderFinanceHistory();
+        }
+
+        function openEditProfileModal() {
+            document.getElementById('editVehicle').value = currentUserProfile.vehicle;
+            document.getElementById('editProfileModal').classList.remove('hidden');
+        }
+
+        function closeEditProfileModal() {
+            document.getElementById('editProfileModal').classList.add('hidden');
+        }
+
+        function handleUpdateProfile(e) {
+            e.preventDefault();
+            currentUserProfile.vehicle = document.getElementById('editVehicle').value;
+            closeEditProfileModal();
+            alert('Unit details updated successfully in Sobha Windsor Registry.');
+            renderOwnersTable();
+        }
+
+        // ================= INITIALIZE APP ON LOAD =================
+        window.onload = function() {
+            // Render default view (Owner Tab)
+            switchTab('owner');
+        };
+    </script>
+</body>
+</html>
